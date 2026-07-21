@@ -9,3 +9,10 @@ services:
       # change only the left-hand side if you need a different host port.
       - "4738:8080"
     restart: unless-stopped
+    networks:
+      - sandbox-egress
+
+networks:
+  sandbox-egress:
+    external: true
+    name: confluence-sandbox-egress
