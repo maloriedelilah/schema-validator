@@ -1,0 +1,128 @@
+@prefix sh:     <http://www.w3.org/ns/shacl#> .
+@prefix rdf:    <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix xsd:    <http://www.w3.org/2001/XMLSchema#> .
+@prefix schema: <http://schema.org/> .
+# NOTE: schema.org's OWN JSON-LD @context (whether referenced as
+# "https://schema.org" or "https://schema.org/") resolves its terms to the
+# http:// (not https://) namespace for legacy compatibility -- this is a
+# well-known schema.org quirk, confirmed here by actually parsing a test
+# payload with rdflib and inspecting the resulting triples. Using
+# https://schema.org/ in these shapes would silently match NOTHING and
+# every validation would vacuously "pass" -- exactly the silent-failure
+# class this validator exists to prevent. Do not "fix" this to https
+# without re-verifying against how your actual page JSON-LD resolves its
+# @context.
+@prefix ag:     <https://schema-validator.maloriedelilah.internal/shapes/author-geo#> .
+
+#
+# author-geo.shacl.ttl
+# ====================
+# SHACL shapes for the author-geo content model. START MINIMAL: this file
+# encodes ONLY what SLICE-01/02/03 exercise -- Book, Person, WebSite, and
+# the DD-001 cross-reference-resolution rule. It is expected to grow (more
+# schema.org types: BreadcrumbList, ImageObject, etc.) as the content model
+# does; do not treat the entities covered here as exhaustive.
+#
+# All shapes use sh:Violation severity: any finding here should fail a
+# build/CI gate, not just warn.
+#
+
+# ------------------------------------------------------------------------
+# DD-001 -- cross-reference resolution (THE CRITICAL RULE)
+# ------------------------------------------------------------------------
+# In JSON-LD it is trivially easy to write a syntactically valid @id
+# reference (e.g. {"@id": "https://example.com/about#author"}) that points
+# to NOTHING -- no node in the graph actually defines that subject. This
+# is the exact silent-failure class this validator exists to catch: the
+# page *parses*, the reference *looks* right, but the linked entity simply
+# isn't there.
+#
+# ag:DefinedNodeShape below is a small, reusable shape asserting "this node
+# has at least one rdf:type triple somewhere in the graph" -- i.e. it is
+# actually DEFINED, not merely referenced. A dangling @id, by construction,
+# has no triples of its own (nothing else in the document describes it),
+# so it has no rdf:type and fails this shape.
+#
+# We apply ag:DefinedNodeShape (via sh:node) to every property whose value
+# is expected to be a cross-referenced entity: Book.author, WebSite.publisher.
+# We ALSO apply sh:class schema:Person on those same properties to assert
+# the specific expected type. The two checks are conceptually distinct even
+# though, mechanically, both key off the presence/absence of an rdf:type
+# triple for the referenced node under SHACL's default (no-reasoning)
+# semantics:
+#   - sh:node ag:DefinedNodeShape  -> "this reference resolves to *something*
+#     defined in the graph" (the generic DD-001 check -- catches dangling
+#     refs regardless of what type they were supposed to be).
+#   - sh:class schema:Person       -> "and that something is specifically a
+#     Person" (the domain-specific type check).
+# Keeping both means a future author/publisher shape that targets a
+# different class still inherits the DD-001 dangling-reference protection
+# for free by reusing ag:DefinedNodeShape.
+ag:DefinedNodeShape
+    a sh:NodeShape ;
+    sh:property [
+        sh:path rdf:type ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:message "This node is referenced (by @id) but is not defined anywhere in the graph -- it has no rdf:type triple. This is a dangling cross-reference (DD-001)."@en ;
+    ] .
+
+# ------------------------------------------------------------------------
+# Person
+# ------------------------------------------------------------------------
+ag:PersonShape
+    a sh:NodeShape ;
+    sh:targetClass schema:Person ;
+    sh:property [
+        sh:path schema:name ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Violation ;
+        sh:message "schema:Person must have a schema:name."@en ;
+    ] .
+
+# ------------------------------------------------------------------------
+# Book
+# ------------------------------------------------------------------------
+ag:BookShape
+    a sh:NodeShape ;
+    sh:targetClass schema:Book ;
+    sh:property [
+        sh:path schema:name ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Violation ;
+        sh:message "schema:Book must have a schema:name."@en ;
+    ] ;
+    sh:property [
+        sh:path schema:url ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:message "schema:Book must have a schema:url."@en ;
+    ] ;
+    sh:property [
+        sh:path schema:author ;
+        sh:minCount 1 ;
+        # DD-001: the author reference must resolve to a real node in the graph.
+        sh:node ag:DefinedNodeShape ;
+        # And that node must specifically be a Person.
+        sh:class schema:Person ;
+        sh:severity sh:Violation ;
+        sh:message "schema:Book.author must be present, must resolve to a node defined in the graph (not a dangling @id reference), and that node must be a schema:Person."@en ;
+    ] .
+
+# ------------------------------------------------------------------------
+# WebSite
+# ------------------------------------------------------------------------
+ag:WebSiteShape
+    a sh:NodeShape ;
+    sh:targetClass schema:WebSite ;
+    sh:property [
+        sh:path schema:publisher ;
+        sh:minCount 1 ;
+        # DD-001: same dangling-reference protection as Book.author above.
+        sh:node ag:DefinedNodeShape ;
+        sh:class schema:Person ;
+        sh:severity sh:Violation ;
+        sh:message "schema:WebSite.publisher must be present, must resolve to a node defined in the graph (not a dangling @id reference), and that node must be a schema:Person."@en ;
+    ] .
