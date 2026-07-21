@@ -9,7 +9,9 @@
 #   scripts/validate.sh <file.html|file.jsonld> [base-url]
 #
 #   base-url defaults to http://localhost:4738 (the docker-compose mapped
-#   port). Pass a different base-url if the validator is running elsewhere.
+#   port) for callers ON THE HOST. From INSIDE the shared docker network
+#   (e.g. a build/dev container), pass http://schema-validator:8080 instead —
+#   service name + the container's native internal port.
 #
 # Requires: curl, jq, python3 (only for HTML -> JSON-LD extraction).
 # We fail LOUDLY and immediately if a required tool is missing, rather
