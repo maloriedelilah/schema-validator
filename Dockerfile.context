@@ -1,0 +1,29 @@
+# Sidecar image: serves the genuine cached schema.org JSON-LD context over
+# HTTPS, under the hostname schema.org (via a Docker network alias), so the
+# offline validator can resolve `"@context": "https://schema.org"` without
+# any egress. See README.md and nginx.conf for the why.
+#
+# Pinned by tag. NOTE: pin by digest too for full reproducibility — this was
+# NOT hard-pinned here because the build sandbox could not reach the registry
+# to read the genuine manifest-list digest (I refuse to commit a guessed
+# hash — a wrong digest silently fails to pull). After your first
+# `docker compose build`, run `docker image inspect nginx:1.27-alpine
+# --format '{{index .RepoDigests 0}}'` and append `@sha256:...` here.
+FROM nginx:1.27-alpine
+
+# The cached context (genuine bytes from the live schema.org site — 211KB).
+COPY context/schemaorg.jsonld /usr/share/nginx/context/schemaorg.jsonld
+
+# TLS material. The cert's CN/SAN is schema.org so the validator's JVM (which
+# trusts this cert via its truststore) accepts the https://schema.org fetch.
+# NOTE: the private key is committed deliberately — it is a dedicated,
+# self-signed, internal-only key with NO value outside this isolated Docker
+# network, and the SAME keypair must be shared by both the sidecar (serves it)
+# and the validator image (trusts the matching cert), so it cannot be
+# regenerated per-build. See README "Security model".
+COPY tls/schemaorg.crt /etc/nginx/tls/schemaorg.crt
+COPY tls/schemaorg.key /etc/nginx/tls/schemaorg.key
+
+COPY nginx.conf /etc/nginx/conf.d/default.conf
+
+EXPOSE 443

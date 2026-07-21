@@ -81,8 +81,78 @@ comments in the shapes file (`ag:DefinedNodeShape`) for the mechanics.
 
 ## Status
 
-Scaffold + shapes only, committed via PR. **The container has not been
-started or exercised in the build environment** (no Docker available there
-by design — see `VERIFY.md`). The round-trip (build → up → validate clean
-payload → PASS → validate dangled payload → FAIL) is unverified until the
-operator runs the steps in `VERIFY.md` on the LAN.
+The **validator core + shapes round-trip is PROVEN** on the LAN (2026-07-21):
+the operator stood up `isaitb/shacl-validator` with our `authorgeo` domain on
+the shared network, and the orchestrator ran the round-trip from an in-network
+box — a complete clean page validated `SUCCESS` (0 errors), and a page with a
+dangling `#ghost-author` reference validated `FAILURE`, firing exactly the
+DD-001 cross-reference rule. The gate catches the silent-failure class it
+exists for.
+
+This PR adds the **offline `@context` sidecar** (see "How it works" above),
+which lets a page emitting the real `"@context": "https://schema.org"`
+validate without any egress and without rewriting the emitted bytes. The
+sidecar + cert-trust path itself has **not** yet been exercised end-to-end
+(it needs `docker compose up --build` with Docker) — run the steps in
+`VERIFY.md` on the LAN to prove it. Before this sidecar, a page with a remote
+`@context` failed to load in the offline validator (`LOADING_DOCUMENT_FAILED`);
+the acceptance test is that the same page now validates.
+
+## How it works — offline `@context` resolution (the sidecar)
+
+Our built pages emit `"@context": "https://schema.org"` (the real,
+canonical, remote context URL — we deliberately do **not** rewrite it to a
+local one, because the bytes you validate must be the bytes you ship).
+
+But the validator container has **no egress**, so it cannot fetch
+`https://schema.org` from Google. Without the context, the JSON-LD fails to
+load (`LOADING_DOCUMENT_FAILED`) and *nothing* validates — an easy silent
+failure.
+
+The fix is a **sidecar** (`schemaorg-context`, an nginx serving the genuine
+cached 211KB `schemaorg.jsonld`) plus a Docker **network alias**: on the
+shared network, `schema.org` resolves to the sidecar. So when the validator
+does `GET https://schema.org` to resolve a document's context, it reaches
+the sidecar over the LAN and gets the real context bytes — no egress, and
+the emitted page is never modified.
+
+The one wrinkle: the validator GETs it over **HTTPS**, so the sidecar
+presents a self-signed cert whose CN/SAN is `schema.org`, and the validator
+image imports that cert's public half into its JVM truststore
+(`keytool -importcert -cacerts`) so the TLS handshake succeeds. Empirically
+confirmed against this validator: it does a **direct GET on the exact
+`@context` URL** and expects the response body to *be* the context (it does
+not follow a `Link: rel=alternate` header), so the sidecar serves the same
+context bytes at every path.
+
+## Security model — the committed TLS keypair
+
+`tls/schemaorg.crt` **and** `tls/schemaorg.key` are committed to this repo
+**on purpose**. This is a dedicated, self-signed keypair whose *only*
+function is to let the sidecar and the validator agree on a cert for the
+hostname `schema.org` on an **isolated internal Docker network**. It is:
+
+- **not** a public-CA cert, and trusted by nothing except this validator's
+  own baked-in truststore;
+- valid only for the name `schema.org`, which only resolves to our sidecar
+  inside this private network;
+- worthless to anyone with the repo — possessing it grants no access to
+  anything (there is no secret behind it; it protects nothing outside the
+  net).
+
+The keypair must be **shared and fixed** because two independently-built
+images depend on it: the sidecar *serves* the cert, and the validator
+*trusts* the matching one — they cannot each generate their own. That's why
+it is committed rather than generated per-build. If you would rather not
+track it, regenerate a pair locally (any CN/SAN `schema.org` self-signed
+cert works), drop it in `tls/`, and rebuild both images; `.gitignore` has a
+commented `tls/*.key` line for that path.
+
+## Reaching it from inside the shared Docker network
+
+`localhost:4738` is the **host** mapping (for a human on the Docker host).
+Other containers on `confluence-sandbox-egress` (build boxes, agent
+sandboxes) reach the validator by **service name on its internal port**:
+`http://schema-validator:8080/shacl/authorgeo/api/validate` — *not* 4738.
+The 4738 host-port mapping and the 8080 in-network port are the same
+service; use whichever matches where you're calling from.

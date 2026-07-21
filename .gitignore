@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- schema-validator: TLS private key handling ---------------------------
+# The sidecar's PRIVATE key. See README "Security model" for the decision on
+# whether this is committed (internal-only self-signed pair) or generated
+# locally. If you regenerate keys locally and do NOT want them tracked,
+# this pattern keeps stray keys out of git:
+# tls/*.key

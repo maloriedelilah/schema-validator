@@ -6,10 +6,10 @@
 # automatically). This is the same reproducibility discipline as a lockfile:
 # `docker build` always gets exactly this image, never a moving `latest`.
 #
-# Verified against Docker Hub's tags API for isaitb/shacl-validator on
-# 2026-07-21. If this image is ever re-pushed upstream the digest would
-# change and this pin would simply fail to resolve (loud failure, not a
-# silent drift onto different bits).
+# This digest pin was carried over from the initial scaffold (PR #1); it was
+# NOT re-verified against Docker Hub in this environment (no registry egress
+# from the build sandbox). If it is stale or wrong the build FAILS LOUDLY at
+# pull time (never a silent drift onto different bits) -- re-pin then.
 FROM isaitb/shacl-validator:1.12.2@sha256:04bbd422d3bbd081390d72c2a31548d860b153d09a6a8a151a6446d3816e81ca
 
 # Layer in OUR domain configuration + SHACL shapes. The generic image is just
@@ -29,3 +29,22 @@ ENV validator.resourceRoot /validator/resources/
 # never silently become a second, unintended domain.
 ENV validator.domain authorgeo
 ENV validator.domainName.authorgeo authorgeo
+
+# --- Trust the local schema.org context sidecar -------------------------
+# The sidecar (schemaorg-context service) serves the cached schema.org
+# JSON-LD context over HTTPS under the hostname schema.org (Docker network
+# alias). For the validator's JSON-LD processor to fetch it over https
+# WITHOUT a TLS error, this JVM must trust the sidecar's self-signed cert.
+# We import ONLY the public certificate (never the private key) into the
+# JDK's default truststore (cacerts, default password `changeit`; `-cacerts`
+# targets $JAVA_HOME/lib/security/cacerts on JDK 9+).
+#
+# If a future base image uses a JRE whose cacerts is elsewhere or whose
+# keytool lacks `-cacerts`, this RUN will FAIL LOUDLY at build (good) — fix
+# the path here rather than letting an untrusted fetch silently fall back.
+COPY tls/schemaorg.crt /tmp/schemaorg.crt
+RUN keytool -importcert -noprompt -trustcacerts \
+        -alias schemaorg-local \
+        -file /tmp/schemaorg.crt \
+        -cacerts -storepass changeit \
+    && rm -f /tmp/schemaorg.crt
