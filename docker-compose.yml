@@ -1,0 +1,11 @@
+services:
+  schema-validator:
+    build: .
+    image: schema-validator:authorgeo
+    container_name: schema-validator
+    ports:
+      # Host 4738 -> container 8080 (the validator's fixed internal port).
+      # 4738 was picked to avoid colliding with other homelab services;
+      # change only the left-hand side if you need a different host port.
+      - "4738:8080"
+    restart: unless-stopped
