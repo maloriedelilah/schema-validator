@@ -3,13 +3,11 @@
 # offline validator can resolve `"@context": "https://schema.org"` without
 # any egress. See README.md and nginx.conf for the why.
 #
-# Pinned by tag. NOTE: pin by digest too for full reproducibility — this was
-# NOT hard-pinned here because the build sandbox could not reach the registry
-# to read the genuine manifest-list digest (I refuse to commit a guessed
-# hash — a wrong digest silently fails to pull). After your first
-# `docker compose build`, run `docker image inspect nginx:1.27-alpine
-# --format '{{index .RepoDigests 0}}'` and append `@sha256:...` here.
-FROM nginx:1.27-alpine
+# Pinned by tag AND digest for full reproducibility. The digest is the genuine
+# manifest-list digest for nginx:1.27-alpine, read from Docker Hub's registry
+# (registry-1.docker.io) — NOT a guessed hash. Re-verify/refresh on a version
+# bump with: docker image inspect nginx:1.27-alpine --format '{{index .RepoDigests 0}}'
+FROM nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
 
 # The cached context (genuine bytes from the live schema.org site — 211KB).
 COPY context/schemaorg.jsonld /usr/share/nginx/context/schemaorg.jsonld
