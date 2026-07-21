@@ -1,6 +1,12 @@
 services:
+  # The SHACL validator (isaitb core + our author-geo domain/shapes).
+  # Its JVM truststore trusts the sidecar's self-signed schema.org cert
+  # (baked in via Dockerfile), so it can resolve `@context:
+  # "https://schema.org"` by fetching from the sidecar over HTTPS.
   schema-validator:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     image: schema-validator:authorgeo
     container_name: schema-validator
     ports:
@@ -11,6 +17,25 @@ services:
     restart: unless-stopped
     networks:
       - sandbox-egress
+    depends_on:
+      - schemaorg-context
+
+  # Sidecar: serves the genuine cached schema.org JSON-LD context over HTTPS.
+  # The `aliases: [schema.org]` below makes internal DNS on the shared network
+  # resolve `schema.org` to THIS container — so when the validator does
+  # `GET https://schema.org` to resolve a document's @context, it reaches here
+  # (no egress needed). See nginx.conf and README "How it works".
+  schemaorg-context:
+    build:
+      context: .
+      dockerfile: Dockerfile.context
+    image: schemaorg-context:authorgeo
+    container_name: schemaorg-context
+    restart: unless-stopped
+    networks:
+      sandbox-egress:
+        aliases:
+          - schema.org
 
 networks:
   sandbox-egress:
