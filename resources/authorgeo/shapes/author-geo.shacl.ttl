@@ -82,33 +82,97 @@ ag:PersonShape
     ] .
 
 # ------------------------------------------------------------------------
-# Book
+# Book -- DD-005: PRIMARY Book vs EDITION.
 # ------------------------------------------------------------------------
-ag:BookShape
+# DD-005 draws a line between the PRIMARY (canonical) Book and its EDITIONS:
+#   - The PRIMARY Book is the canonical work. It owns the single on-site
+#     canonical schema:url (its own page), a name, and author(s). In the
+#     emitted JSON-LD it is the IRI-identified Book (has an @id ending
+#     #book); it is a top-level @graph member, NOT the object of a
+#     schema:workExample.
+#   - An EDITION (hardcover / ebook / audiobook) is a manifestation of the
+#     work, emitted as an ANONYMOUS (blank-node) schema:Book that is the
+#     OBJECT OF schema:workExample. Editions are identified by format-level
+#     facts (bookFormat, isbn) and carry retailer buy-links as schema:Offer
+#     (Offer.url), NOT a Book.url -- because a retailer link is a purchase
+#     point, not a canonical page, and one edition may have many buy-links.
+#
+# Therefore we do NOT police every schema:Book with the strict
+# name/url/author requirements (that would force editions to fabricate a
+# name/url/author they legitimately don't have -- the "rewrite the payload
+# to pass the validator" anti-pattern). We split into two shapes:
+#   ag:PrimaryBookShape -> strict (name, url, author), targeted ONLY at
+#                          IRI-identified Books via a SPARQL target.
+#   ag:EditionShape     -> light (bookFormat + a well-formed Offer),
+#                          targeted at the objects of schema:workExample.
+
+# PRIMARY Book: SPARQL target selects Books that are NAMED (IRI @id), which
+# excludes the blank-node editions. (ITB's SHACL engine is Jena/TopBraid,
+# which supports sh:target + sh:SPARQLTarget.)
+ag:PrimaryBookShape
     a sh:NodeShape ;
-    sh:targetClass schema:Book ;
+    sh:target [
+        a sh:SPARQLTarget ;
+        # PREFIX must be declared INSIDE the query: a SPARQL target does NOT
+        # inherit the Turtle document's @prefix bindings. Without this,
+        # `schema:Book` is an unknown prefix, the query matches NOTHING, and
+        # the whole PrimaryBookShape passes VACUOUSLY -- the exact silent
+        # "match nothing => vacuous pass" failure this validator exists to
+        # catch (verified: without the PREFIX line, dangled-author and
+        # missing-url primary Books both wrongly conformed).
+        sh:select """
+            PREFIX schema: <http://schema.org/>
+            SELECT ?this WHERE {
+                ?this a schema:Book .
+                FILTER (isIRI(?this))
+            }
+        """ ;
+    ] ;
     sh:property [
         sh:path schema:name ;
         sh:minCount 1 ;
         sh:datatype xsd:string ;
         sh:severity sh:Violation ;
-        sh:message "schema:Book must have a schema:name."@en ;
+        sh:message "The primary schema:Book must have a schema:name."@en ;
     ] ;
     sh:property [
         sh:path schema:url ;
         sh:minCount 1 ;
         sh:severity sh:Violation ;
-        sh:message "schema:Book must have a schema:url."@en ;
+        sh:message "The primary schema:Book must have a schema:url (its single on-site canonical page URL -- DD-005)."@en ;
     ] ;
     sh:property [
         sh:path schema:author ;
         sh:minCount 1 ;
-        # DD-001: the author reference must resolve to a real node in the graph.
+        # DD-001 dangling-reference protection: the author reference must
+        # resolve to a node actually DEFINED in the graph (has an rdf:type).
+        # A named stub {@type:Person, @id, name} SATISFIES this -- it carries
+        # its own rdf:type + name -- so the DD-001 "define once on /about,
+        # reference by @id + named stub everywhere" model passes here, while
+        # a bare {@id} that nothing else defines still FAILS. (DD-001 + #1.)
         sh:node ag:DefinedNodeShape ;
-        # And that node must specifically be a Person.
         sh:class schema:Person ;
         sh:severity sh:Violation ;
-        sh:message "schema:Book.author must be present, must resolve to a node defined in the graph (not a dangling @id reference), and that node must be a schema:Person."@en ;
+        sh:message "The primary schema:Book.author must be present and must resolve to a schema:Person node defined in the graph -- a named stub {@type:Person,@id,name} counts; a dangling @id does not (DD-001)."@en ;
+    ] .
+
+# EDITION: the objects of schema:workExample. Light, edition-appropriate
+# checks -- a format, and if an Offer is present it must carry a url.
+# (bookFormat required; author/url/name intentionally NOT required here.)
+ag:EditionShape
+    a sh:NodeShape ;
+    sh:targetObjectsOf schema:workExample ;
+    sh:property [
+        sh:path schema:bookFormat ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:message "A Book edition (schema:workExample) must state its schema:bookFormat (DD-005)."@en ;
+    ] ;
+    sh:property [
+        sh:path ( schema:offers schema:url ) ;
+        sh:minCount 1 ;
+        sh:severity sh:Violation ;
+        sh:message "A Book edition's schema:Offer must carry a schema:url (the retailer buy-link -- DD-005)."@en ;
     ] .
 
 # ------------------------------------------------------------------------
