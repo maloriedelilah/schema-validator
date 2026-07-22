@@ -106,9 +106,30 @@ ag:PersonShape
 #   ag:EditionShape     -> light (bookFormat + a well-formed Offer),
 #                          targeted at the objects of schema:workExample.
 
-# PRIMARY Book: SPARQL target selects Books that are NAMED (IRI @id), which
-# excludes the blank-node editions. (ITB's SHACL engine is Jena/TopBraid,
-# which supports sh:target + sh:SPARQLTarget.)
+# PRIMARY vs STUB Book (added when collection pages -- series, themes/hubs --
+# began referencing books as NAMED STUBS). A named stub is an IRI-identified
+# schema:Book that carries @id + name but deliberately NOT url/author/editions
+# (DD-001: a cross-page reference must resolve standalone, so it is a typed +
+# named node, not a bare @id -- but it is a REFERENCE, not the canonical
+# definition). The canonical Book is defined once on its OWN page with full
+# fields. So targeting "every IRI Book" for the strict shape WRONGLY fails the
+# stubs (they legitimately lack url/author).
+#
+# THE PARTITION (per-page validation): on a book's own page the Book is never
+# the object of a collection membership predicate; on a series/hub page the
+# stub ALWAYS is -- BookSeries.hasPart -> {@id} (series) and
+# ItemList/ListItem.item -> {@type:Book,@id,name} (themes/hubs). So:
+#   PRIMARY  = IRI Book NOT referenced as a collection member  -> strict shape.
+#   STUB     = IRI Book referenced as a collection member       -> light shape.
+# The two SPARQL targets are EXACT logical complements (NOT EXISTS vs its
+# EXISTS negation over the same predicates): their union is provably ALL IRI
+# Books and their intersection is empty, so nothing falls through BOTH (which
+# would be a vacuous pass) and nothing is caught by BOTH. We deliberately do
+# NOT discriminate by "has a url/workExample" -- that entangles the target with
+# a property the shape itself checks, relocating the vacuous-pass hole (a
+# canonical Book that legitimately lacks that property would drop out of
+# validation entirely instead of failing). (ITB's SHACL engine is
+# Jena/TopBraid, which supports sh:target + sh:SPARQLTarget.)
 ag:PrimaryBookShape
     a sh:NodeShape ;
     sh:target [
@@ -120,11 +141,16 @@ ag:PrimaryBookShape
         # "match nothing => vacuous pass" failure this validator exists to
         # catch (verified: without the PREFIX line, dangled-author and
         # missing-url primary Books both wrongly conformed).
+        # NOTE http:// namespace, not https:// -- schema.org's @context
+        # resolves terms to http://schema.org/ (see file header); https would
+        # match nothing.
         sh:select """
             PREFIX schema: <http://schema.org/>
             SELECT ?this WHERE {
                 ?this a schema:Book .
                 FILTER (isIRI(?this))
+                FILTER NOT EXISTS { ?s schema:hasPart ?this }
+                FILTER NOT EXISTS { ?li schema:item ?this }
             }
         """ ;
     ] ;
@@ -154,6 +180,37 @@ ag:PrimaryBookShape
         sh:class schema:Person ;
         sh:severity sh:Violation ;
         sh:message "The primary schema:Book.author must be present and must resolve to a schema:Person node defined in the graph -- a named stub {@type:Person,@id,name} counts; a dangling @id does not (DD-001)."@en ;
+    ] .
+
+# STUB Book: an IRI Book referenced as a collection member (object of
+# schema:hasPart on a series, or schema:item under an ItemList on a hub/theme).
+# This is the EXACT logical complement of PrimaryBookShape's target -- their
+# union is all IRI Books, their intersection empty. A stub must carry a name
+# (so the reference is human/machine-meaningful, not a bare @id -- DD-001); it
+# deliberately does NOT require url/author/editions (those live on the book's
+# own canonical page). If BOTH shapes ever matched the same node it would be a
+# bug in this partition; if NEITHER matched, that node would escape validation
+# -- the complementary NOT EXISTS/EXISTS construction makes both impossible.
+ag:StubBookShape
+    a sh:NodeShape ;
+    sh:target [
+        a sh:SPARQLTarget ;
+        sh:select """
+            PREFIX schema: <http://schema.org/>
+            SELECT ?this WHERE {
+                ?this a schema:Book .
+                FILTER (isIRI(?this))
+                FILTER ( EXISTS { ?s schema:hasPart ?this }
+                      || EXISTS { ?li schema:item ?this } )
+            }
+        """ ;
+    ] ;
+    sh:property [
+        sh:path schema:name ;
+        sh:minCount 1 ;
+        sh:datatype xsd:string ;
+        sh:severity sh:Violation ;
+        sh:message "A referenced (stub) schema:Book must carry a schema:name -- a bare @id is a dangling reference (DD-001). Its full definition (url, author, editions) lives on the book's own page."@en ;
     ] .
 
 # EDITION: the objects of schema:workExample. Light, edition-appropriate
